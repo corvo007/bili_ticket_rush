@@ -34,11 +34,11 @@ pub fn show(app: &mut Myapp,ctx:&egui::Context,uid:&i64){
         let biliticket = &app.bilibiliticket_list[biliticket_index];
         
         biliticket_uid = biliticket.uid;
-        biliticket_project_id = biliticket.project_info.as_ref().map(|p| p.id.to_string());
+        biliticket_project_id = biliticket.project_info.as_ref().map(|p| p.id.unwrap_or(0).to_string());
         cookie_manager = biliticket.account.cookie_manager.clone().unwrap();
         
         id_bind = match &biliticket.project_info {
-            Some(project) => project.id_bind,
+            Some(project) => project.id_bind.unwrap_or(9),
             None => 9,
         };
     
@@ -46,11 +46,11 @@ pub fn show(app: &mut Myapp,ctx:&egui::Context,uid:&i64){
      let (screen, ticket) = match &biliticket.project_info {
         Some(project) => {
             let screen = project.screen_list.iter().find(|s| 
-                s.id.to_string() == biliticket.screen_id);
+                s.id.unwrap_or(0).to_string() == biliticket.screen_id);
             
             if let Some(screen) = screen {
                 let ticket = screen.ticket_list.iter().find(|t| 
-                    t.id == app.selected_ticket_id.unwrap_or(-1) as usize);
+                    t.id.unwrap_or(0) == app.selected_ticket_id.unwrap_or(-1) as usize);
                 
                 (Some(screen.clone()), ticket.cloned())
             } else {
@@ -114,18 +114,18 @@ pub fn show(app: &mut Myapp,ctx:&egui::Context,uid:&i64){
                     // 显示项目名称
                     let biliticket = &app.bilibiliticket_list[biliticket_index];
                     if let Some(project) = &biliticket.project_info {
-                        ui.label(RichText::new(&project.name).strong().size(16.0));
+                        ui.label(RichText::new(project.name.as_deref().unwrap_or("未知项目")).strong().size(16.0));
                     }
 
                     // 显示场次和票种信息
                     if let Some(screen) = screen_info_display {
-                        ui.label(RichText::new(format!("场次: {}", &screen.name)).size(14.0));
+                        ui.label(RichText::new(format!("场次: {}", screen.name.as_deref().unwrap_or("未知场次"))).size(14.0));
                         
                         if let Some(ticket) = ticket_info_display {
                             ui.horizontal(|ui| {
-                                ui.label(format!("票种: {}", &ticket.desc));
+                                ui.label(format!("票种: {}", ticket.desc.as_deref().unwrap_or("未知票种")));
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    ui.label(RichText::new(format!("¥{:.2}", ticket.price as f64 / 100.0))
+                                    ui.label(RichText::new(format!("¥{:.2}", ticket.price.unwrap_or(0) as f64 / 100.0))
                                         .color(Color32::from_rgb(239, 68, 68))
                                         .strong());
                                 });
@@ -149,7 +149,7 @@ pub fn show(app: &mut Myapp,ctx:&egui::Context,uid:&i64){
                                     app.bilibiliticket_list[biliticket_index].count = Some(count);
                                 }
                                 
-                                ui.label(format!("总价: ¥{:.2}", (ticket.price as f64 / 100.0) * count as f64));
+                                ui.label(format!("总价: ¥{:.2}", (ticket.price.unwrap_or(0) as f64 / 100.0) * count as f64));
                             });
                         }
                     }
@@ -386,7 +386,7 @@ pub fn show(app: &mut Myapp,ctx:&egui::Context,uid:&i64){
                     // 根据模式决定按钮启用条件
                     let biliticket = &app.bilibiliticket_list[biliticket_index];
                     let local_captcha = app.local_captcha.clone();
-                    let is_hot = biliticket.project_info.clone().as_ref().map_or(false, |p| p.hot_project);
+                    let is_hot = biliticket.project_info.clone().as_ref().map_or(false, |p| p.hot_project.unwrap_or(false));
                     let button_enabled = match id_bind {
                         0 => {
                             // 检查非实名购票人信息是否完整
@@ -425,9 +425,9 @@ pub fn show(app: &mut Myapp,ctx:&egui::Context,uid:&i64){
                                         task_id: "".to_string(),
                                         uid: biliticket_uid,
                                         project_id: biliticket_project_id.clone().unwrap_or_default(),
-                                        screen_id: screen.id.to_string(),
-                                        ticket_id: ticket.id.to_string(),
-                                        is_hot: is_hot, 
+                                        screen_id: screen.id.unwrap_or(0).to_string(),
+                                        ticket_id: ticket.id.unwrap_or(0).to_string(),
+                                        is_hot: is_hot,
                                         count: app.bilibiliticket_list[biliticket_index].clone().count.unwrap_or(1) as i16,
                                         buyer_info: Vec::new(), // 实名购票人信息,这里传空列表
                                         grab_mode: app.grab_mode,
@@ -470,8 +470,8 @@ pub fn show(app: &mut Myapp,ctx:&egui::Context,uid:&i64){
                                                     task_id: "".to_string(),
                                                     uid: biliticket_uid,
                                                     project_id: biliticket_project_id.clone().unwrap_or_default(),
-                                                    screen_id: screen.id.to_string(),
-                                                    ticket_id: ticket.id.to_string(),
+                                                    screen_id: screen.id.unwrap_or(0).to_string(),
+                                                    ticket_id: ticket.id.unwrap_or(0).to_string(),
                                                     is_hot: is_hot,
                                                     count: app.bilibiliticket_list[biliticket_index].clone().count.unwrap_or(1) as i16,
                                                     buyer_info: buyer_list.clone(),

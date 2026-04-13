@@ -12,11 +12,55 @@ use serde_json::{json, Value};
 use rand::{thread_rng, Rng};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+fn cache_path(project_id: &str) -> std::path::PathBuf {
+    let dir = std::path::Path::new("cache");
+    dir.join(format!("project_{}.json", project_id))
+}
+
+fn save_project_cache(project_id: &str, info: &InfoResponse) {
+    let path = cache_path(project_id);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match serde_json::to_string_pretty(info) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&path, json) {
+                log::warn!("保存项目缓存失败: {}", e);
+            } else {
+                log::info!("已缓存项目信息到 {:?}", path);
+            }
+        }
+        Err(e) => log::warn!("序列化项目缓存失败: {}", e),
+    }
+}
+
+fn load_project_cache(project_id: &str) -> Option<InfoResponse> {
+    let path = cache_path(project_id);
+    match std::fs::read_to_string(&path) {
+        Ok(json) => {
+            match serde_json::from_str::<InfoResponse>(&json) {
+                Ok(info) => {
+                    log::info!("已从本地缓存加载项目信息: {:?}", path);
+                    Some(info)
+                }
+                Err(e) => {
+                    log::warn!("解析本地缓存失败: {}", e);
+                    None
+                }
+            }
+        }
+        Err(_) => None,
+    }
+}
+
 
 pub async fn get_countdown(cookie_manager: Arc<CookieManager>, info: Option<TicketInfo>) -> Result<f64, String> {
     // 获取开始时间 (秒级)
     let sale_begin_sec = match info {
-        Some(info) => info.sale_begin ,
+        Some(info) => match info.sale_begin {
+            Some(v) => v,
+            None => return Err("开售时间(sale_begin)为空".to_string()),
+        },
         None => return Err("获取开始时间失败".to_string()),
     };
     log::debug!("获取开始时间(秒级)：{}", sale_begin_sec);
@@ -113,7 +157,7 @@ pub async fn get_buyer_info(cookie_manager: Arc<CookieManager>) -> Result<BuyerI
 pub async fn get_project(cookie_manager: Arc<CookieManager>, project_id : &str) -> Result<InfoResponse,String>{
     let req = cookie_manager.get(format!("https://show.bilibili.com/api/ticket/project/getV2?id={}",project_id).as_str()).await;
     let response = req.send().await;
-    match response {
+    let result = match response {
         Ok(resp)=>{
             if resp.status().is_success(){
                 match tokio::task::block_in_place(||{
@@ -124,28 +168,54 @@ pub async fn get_project(cookie_manager: Arc<CookieManager>, project_id : &str) 
                         log::debug!("获取项目详情：{}",text);
                         // 尝试常规解析
                         match serde_json::from_str::<InfoResponse>(&text){
-                            Ok(ticket_info) => {
-                                return Ok(ticket_info);
+                            Ok(mut ticket_info) => {
+                                // 补全缺失的 sale_begin（从 screen_list 提取）
+                                ticket_info.data.fill_missing_sale_begin();
+                                
+                                // 校验关键字段是否缺失
+                                if let Err(e) = ticket_info.data.validate() {
+                                    Err(e)
+                                } else {
+                                    Ok(ticket_info)
+                                }
                             }
                             Err(e) => {
                                 log::error!("获取项目详情json解析失败：{}", e);
-                                return Err(format!("获取项目详情json解析失败：{}", e));
+                                Err(format!("获取项目详情json解析失败：{}", e))
                             }
                         }
                     }
                     Err(e) => {
                         log::error!("获取项目详情失败：{}", e);
-                        return Err(format!("获取项目详情失败：{}", e));
+                        Err(format!("获取项目详情失败：{}", e))
                     }
                 }
             }
             else{
                 log::debug!("请求响应失败: {:?}", resp);
-                return Err(format!("请求响应失败: {}", resp.status()));
+                Err(format!("请求响应失败: {}", resp.status()))
             }
         }
         Err(e) => {
             Err(format!("请求失败: {}", e))
+        }
+    };
+
+    // 成功时缓存到本地，失败时尝试从缓存加载
+    match result {
+        Ok(info) => {
+            save_project_cache(project_id, &info);
+            Ok(info)
+        }
+        Err(e) => {
+            log::warn!("在线获取项目信息失败({}), 尝试从本地缓存加载...", e);
+            match load_project_cache(project_id) {
+                Some(cached) => {
+                    log::info!("已降级使用本地缓存的项目信息");
+                    Ok(cached)
+                }
+                None => Err(e),
+            }
         }
     }
 }

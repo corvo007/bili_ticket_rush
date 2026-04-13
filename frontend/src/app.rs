@@ -573,6 +573,8 @@ impl Myapp{
                             Some(ref info) => info,
                             None => {
                                 log::error!("获取project信息失败: {}", order_result.message);
+                                self.is_loading = false;
+                                // 保留时间戳，避免无限重试（遵循5秒延迟）
                                 continue;
                             }
                         };
@@ -592,7 +594,12 @@ impl Myapp{
                         
                     }else{
                         log::error!("获取project信息失败: {}", order_result.message);
-                        self.show_screen_info = None; 
+                        self.is_loading = false;
+                        self.error_banner_active = true;
+                        self.error_banner_text = format!("获取项目信息失败: {}", order_result.message);
+                        self.error_banner_start_time = Some(std::time::Instant::now());
+                        self.error_banner_opacity = 1.0;
+                        // 保留时间戳，避免无限重试（遵循5秒延迟）
                     }
 
                 }
@@ -1121,7 +1128,7 @@ impl eframe::App for Myapp{
                     None => true,
                 };
                 let mut id_bind = match bilibili_ticket.project_info.clone(){
-                    Some(proj_info) => proj_info.id_bind,
+                    Some(proj_info) => proj_info.id_bind.unwrap_or(0),
                     None => 0,
                 };
                 if bilibili_ticket.method == 2 {  //如果是捡漏模式，直接请求购票人信息

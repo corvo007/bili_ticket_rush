@@ -205,44 +205,123 @@ impl BilibiliTicket{
 
 #[derive(Clone,Debug,Deserialize,Serialize)]
 pub struct TicketInfo {
-    pub id: i32,
-    pub name: String,
-    pub is_sale: usize,
-    pub start_time: i64,
-    pub end_time: i64,
-    pub pick_seat: usize, //0:不选座 1:选座
-    pub project_type: usize, //未知作用，bw2024是type1
+    pub id: Option<i32>,
+    pub name: Option<String>,
+    pub is_sale: Option<usize>,
+    pub start_time: Option<i64>,
+    pub end_time: Option<i64>,
+    pub pick_seat: Option<usize>, //0:不选座 1:选座
+    pub project_type: Option<usize>, //未知作用，bw2024是type1
     #[serde(default)]
     pub express_fee: Option<usize>, //快递费
-    pub sale_begin: i64, //开售时间
-    pub sale_end: i64, //截止时间
-    pub count_down: i64, //倒计时（可能有负数）
+    pub sale_begin: Option<i64>, //开售时间
+    pub sale_end: Option<i64>, //截止时间
+    pub count_down: Option<i64>, //倒计时（可能有负数）
     pub screen_list: Vec<ScreenInfo>, //场次列表
-    pub sale_flag_number: usize, //售票标志位
+    pub sale_flag_number: Option<usize>, //售票标志位
     #[serde(default)]
     pub sale_flag: String, //售票状态
-    pub is_free: bool,
+    pub is_free: Option<bool>,
     pub performance_desc: Option<DescribeList>, //基础信息
-    pub id_bind: usize, //是否绑定
+    pub id_bind: Option<usize>, //是否绑定
     #[serde(rename = "hotProject")]
-    pub hot_project: bool, //是否热门项目
+    pub hot_project: Option<bool>, //是否热门项目
 
     
 
 
 }
 
+impl TicketInfo {
+    /// 如果 sale_begin 缺失，尝试从 screen_list 中提取开售时间作为 fallback
+    pub fn fill_missing_sale_begin(&mut self) {
+        if self.sale_begin.is_some() {
+            return; // 已有值，无需处理
+        }
+
+        let mut candidate_times: Vec<i64> = Vec::new();
+
+        // 从 screen_list 中提取时间
+        for screen in &self.screen_list {
+            // 1. 尝试 screen.start_time (Option<usize>)
+            if let Some(t) = screen.start_time {
+                if t > 0 {
+                    candidate_times.push(t as i64);
+                }
+            }
+
+            // 2. 尝试 screen.sale_start (usize, 非 Option)
+            if screen.sale_start > 0 {
+                candidate_times.push(screen.sale_start as i64);
+            }
+
+            // 3. 从 ticket_list 中提取 saleStart
+            for ticket in &screen.ticket_list {
+                if let Some(t) = ticket.saleStart {
+                    if t > 0 {
+                        candidate_times.push(t as i64);
+                    }
+                }
+            }
+        }
+
+        // 选择最早的时间作为 sale_begin
+        if let Some(&earliest) = candidate_times.iter().min() {
+            self.sale_begin = Some(earliest);
+            log::info!("sale_begin 缺失，已从 screen_list 提取最早时间: {}", earliest);
+        } else {
+            log::warn!("sale_begin 缺失且无法从 screen_list 提取有效时间");
+        }
+    }
+
+    /// 校验项目信息中后续流程必需的字段是否为空
+    /// 如果关键字段缺失则记录错误日志并返回 Err
+    pub fn validate(&self) -> Result<(), String> {
+        let mut missing = Vec::new();
+
+        if self.id.is_none() {
+            missing.push("id(项目ID)");
+        }
+        if self.name.is_none() {
+            missing.push("name(项目名称)");
+        }
+        if self.sale_begin.is_none() {
+            missing.push("sale_begin(开售时间)");
+        }
+        if self.id_bind.is_none() {
+            missing.push("id_bind(实名绑定标识)");
+        }
+        if self.hot_project.is_none() {
+            missing.push("hotProject(热门项目标识)");
+        }
+        if self.screen_list.is_empty() {
+            missing.push("screen_list(场次列表为空)");
+        }
+
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            let msg = format!(
+                "项目信息校验失败，以下必需字段缺失或为空: [{}]",
+                missing.join(", ")
+            );
+            log::error!("{}", msg);
+            Err(msg)
+        }
+    }
+}
+
 #[derive(Clone,Debug,Deserialize,Serialize)]
 pub struct ScreenInfo {
     #[serde(default)]
     pub sale_flag: SaleFlag,
-    pub id: usize,
-    pub start_time: usize,
-    pub name: String,
-    pub ticket_type: usize,
-    pub screen_type: usize,
-    pub delivery_type: usize,
-    pub pick_seat: usize,
+    pub id: Option<usize>,
+    pub start_time: Option<usize>,
+    pub name: Option<String>,
+    pub ticket_type: Option<usize>,
+    pub screen_type: Option<usize>,
+    pub delivery_type: Option<usize>,
+    pub pick_seat: Option<usize>,
     pub ticket_list: Vec<ScreenTicketInfo>, //当日票种类列表
     pub clickable: bool, //是否可点（可售）
     pub sale_end: usize, //截止时间
@@ -271,22 +350,22 @@ impl Default for SaleFlag {
 
 #[derive(Clone,Debug,Deserialize,Serialize)]
 pub struct ScreenTicketInfo{
-    pub saleStart : usize, //开售时间(时间戳)   eg：1720260000
-    pub saleEnd : usize, //截止时间(时间戳)
-    pub id: usize, //票种id
-    pub project_id: usize, //项目id
-    pub price: usize, //票价(分)
-    pub desc: String, //票种描述
-    pub sale_start: String, //开售时间（字符串）    eg:2024-07-06 18:00:00
-    pub sale_end: String, //截止时间（字符串）
-    pub r#type: usize, //类型 关键词替换，对应”type“
-    pub sale_type: usize, //销售状态
-    pub is_sale: usize, //是否销售？0是1否
-    pub num: usize, //数量
+    pub saleStart : Option<usize>, //开售时间(时间戳)   eg：1720260000
+    pub saleEnd : Option<usize>, //截止时间(时间戳)
+    pub id: Option<usize>, //票种id
+    pub project_id: Option<usize>, //项目id
+    pub price: Option<usize>, //票价(分)
+    pub desc: Option<String>, //票种描述
+    pub sale_start: Option<String>, //开售时间（字符串）    eg:2024-07-06 18:00:00
+    pub sale_end: Option<String>, //截止时间（字符串）
+    pub r#type: Option<usize>, //类型 关键词替换，对应”type“
+    pub sale_type: Option<usize>, //销售状态
+    pub is_sale: Option<usize>, //是否销售？0是1否
+    pub num: Option<usize>, //数量
     pub sale_flag: SaleFlag, //售票状态
-    pub clickable: bool, //是否可点（可售）
-    pub sale_flag_number: usize, //售票标志位
-    pub screen_name: String, //场次名称
+    pub clickable: Option<bool>, //是否可点（可售）
+    pub sale_flag_number: Option<usize>, //售票标志位
+    pub screen_name: Option<String>, //场次名称
 
 
 }

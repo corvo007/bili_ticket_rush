@@ -377,7 +377,9 @@ impl TaskManager for TaskManagerImpl {
                                     let mut is_hot = grab_ticket_req.is_hot.clone();
                                     let mut cpdd = if project_info.is_some(){
                                         Arc::new(Mutex::new(CTokenGenerator::new(
-                                            project_info.clone().unwrap().sale_begin as i64,
+                                            project_info.clone().unwrap().sale_begin.unwrap_or(
+                                                SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64
+                                            ),
                                             0,
                                             rng.gen_range(2000..10000)
                                             
@@ -716,7 +718,7 @@ impl TaskManager for TaskManagerImpl {
                                                             continue;
                                                         }
                                                     };
-                                                    is_hot = project_data.data.hot_project;
+                                                    is_hot = project_data.data.hot_project.unwrap_or(false);
                                                     
                                                     // 检查项目是否可售
                                                     /* if ![8,2].contains(&project_data.data.sale_flag_number){
@@ -724,44 +726,46 @@ impl TaskManager for TaskManagerImpl {
                                                         break 'main_loop; // 直接退出整个捡漏模式
                                                     } */
                                                     
-                                                    if ![1, 2].contains(&project_data.data.id_bind) {
+                                                    if ![1, 2].contains(&project_data.data.id_bind.unwrap_or(0)) {
                                                         log::error!("暂不支持抢非实名票捡漏模式");
                                                         break 'main_loop; 
                                                     } 
-                                                    local_grab_request.biliticket.id_bind = project_data.data.id_bind.clone() as usize;
+                                                    local_grab_request.biliticket.id_bind = project_data.data.id_bind.unwrap_or(0);
                                                     'screen_loop: for screen_data in project_data.data.screen_list {
                                                         if !screen_data.clickable {
                                                             continue; 
                                                         }
                                                         
-                                                        local_grab_request.screen_id = screen_data.id.clone().to_string();
-                                                        local_grab_request.biliticket.screen_id = screen_data.id.clone().to_string();
+                                                        local_grab_request.screen_id = screen_data.id.unwrap_or(0).to_string();
+                                                        local_grab_request.biliticket.screen_id = screen_data.id.unwrap_or(0).to_string();
                                                         log::info!("当前项目有可抢票场次，开始抢票！");
                                                         
                                                         // 遍历票种
                                                         'ticket_loop: for ticket_data in screen_data.ticket_list {
-                                                            if !ticket_data.clickable {
+                                                            if !ticket_data.clickable.unwrap_or(false) {
                                                                 continue; // 跳过不可点击的票种
                                                             }
                                                             if let Some(skip_words) = skip_words.clone() {
                                                                 // 检查标题是否包含需要过滤的关键词
-                                                                let title = ticket_data.screen_name.to_lowercase();
+                                                                let title = ticket_data.screen_name.clone().unwrap_or_default().to_lowercase();
                                                                 if skip_words.iter().any(|word| title.contains(&word.to_lowercase())) {
-                                                                    log::info!("跳过包含过滤关键词的场次: {}", ticket_data.screen_name);
+                                                                    log::info!("跳过包含过滤关键词的场次: {}", ticket_data.screen_name.as_deref().unwrap_or("未知场次"));
                                                                     continue; // 跳过这个场次
                                                                 }
-                                                                let ticket_title = ticket_data.desc.to_lowercase();
+                                                                let ticket_title = ticket_data.desc.clone().unwrap_or_default().to_lowercase();
                                                                 if skip_words.iter().any(|word| ticket_title.contains(&word.to_lowercase())) {
-                                                                    log::info!("跳过包含过滤关键词的票种: {}", ticket_data.screen_name);
+                                                                    log::info!("跳过包含过滤关键词的票种: {}", ticket_data.screen_name.as_deref().unwrap_or("未知票种"));
                                                                     continue; // 跳过这个票种
                                                                 }
                                                             }
                                                             
-                                                            log::info!("当前{} {}票种可售，开始抢票！", ticket_data.screen_name, ticket_data.desc);
-                                                            local_grab_request.ticket_id = ticket_data.id.clone().to_string();
-                                                            local_grab_request.biliticket.select_ticket_id = Some(ticket_data.id.clone().to_string());
+                                                            log::info!("当前{} {}票种可售，开始抢票！", ticket_data.screen_name.as_deref().unwrap_or("未知场次"), ticket_data.desc.as_deref().unwrap_or("未知票种"));
+                                                            local_grab_request.ticket_id = ticket_data.id.unwrap_or(0).to_string();
+                                                            local_grab_request.biliticket.select_ticket_id = Some(ticket_data.id.unwrap_or(0).to_string());
                                                             cpdd = Arc::new(Mutex::new(CTokenGenerator::new(
-                                                                project_data.data.sale_begin as i64, 
+                                                                project_data.data.sale_begin.unwrap_or(
+                                                                    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64
+                                                                ), 
                                                                 0, 
                                                                 rng.gen_range(2000..10000)
                                                             )));
@@ -1266,7 +1270,12 @@ async fn try_create_order(
                 // 处理错误情况
                 match e {
                     //需要继续重试的临时错误
-                    100001 | 429 | 900001=> log::info!("b站限速，正常现象"),
+                    100001 | 429 | 900001=> 
+                    {
+                        log::info!("b站限速，正常现象");
+                        tokio::time::sleep(tokio::time::Duration::from_secs_f32(0.3)).await; 
+
+                },
                     100009 => { 
                         log::info!("当前票种库存不足");
                         //再次降速，不给b站服务器带来压力

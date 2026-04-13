@@ -14,28 +14,43 @@ pub fn show(app: &mut Myapp, ctx: &egui::Context, uid: i64) {
     let ticket_data = match bilibili_ticket.project_info.clone() {
         Some(ticket) => {
             app.is_loading = false;
-            ticket
+            Some(ticket)
         }
-        None => {
-            app.is_loading = true;
-            return;
-        }
+        None => None,
     };
-    //默认选择第一个场次（如果尚未选择）
-    if app.selected_screen_index.is_none() && !ticket_data.screen_list.is_empty() {
-        app.selected_screen_index = Some(0);
+
+    if let Some(ref td) = ticket_data {
+        //默认选择第一个场次（如果尚未选择）
+        if app.selected_screen_index.is_none() && !td.screen_list.is_empty() {
+            app.selected_screen_index = Some(0);
+        }
+        bilibili_ticket.id_bind = td.id_bind.unwrap_or(0);
     }
-    bilibili_ticket.id_bind = ticket_data.id_bind as usize;
+
     egui::Window::new("项目详情")
     .open(&mut window_open)
     .default_height(600.0)
     .default_width(800.0)
     .resizable(true)
     .show(ctx, |ui| {
+        // 如果项目信息还未加载，展示加载中提示
+        let ticket_data = match ticket_data {
+            Some(ref td) => td,
+            None => {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(20.0);
+                    ui.spinner();
+                    ui.add_space(10.0);
+                    ui.label("正在获取项目信息，请稍候...");
+                    ui.add_space(20.0);
+                });
+                return;
+            }
+        };
         egui::ScrollArea::vertical().show(ui, |ui| {
             // 项目标题区
             ui.vertical_centered(|ui| {
-                ui.heading(&ticket_data.name);
+                ui.heading(ticket_data.name.as_deref().unwrap_or("未知项目"));
                 ui.add_space(5.0);
 
                 /* // 活动时间和地点
@@ -62,7 +77,7 @@ pub fn show(app: &mut Myapp, ctx: &egui::Context, uid: i64) {
                             egui::SelectableLabel::new(
                                 is_selected,
                                 format!("{} ({})",
-                                    screen.name,
+                                    screen.name.as_deref().unwrap_or("未知场次"),
                                     &screen.sale_flag.display_name
                                 )
                             )
@@ -95,7 +110,7 @@ pub fn show(app: &mut Myapp, ctx: &egui::Context, uid: i64) {
                         .outer_margin(10.0)
                         .show(ui, |ui| {
                             // 场次基本信息
-                            ui.label(format!("开始时间: {}", format_timestamp(selected_screen.start_time)));
+                            ui.label(format!("开始时间: {}", format_timestamp(selected_screen.start_time.unwrap_or(0))));
                             ui.label(format!("售票开始: {}", format_timestamp(selected_screen.sale_start)));
                             ui.label(format!("售票结束: {}", format_timestamp(selected_screen.sale_end)));
                             ui.label(format!("售票状态: {}", selected_screen.sale_flag.display_name));
@@ -124,10 +139,10 @@ pub fn show(app: &mut Myapp, ctx: &egui::Context, uid: i64) {
                             for ticket in &selected_screen.ticket_list {
                                 ui.add_space(5.0);
                                 ui.horizontal(|ui| {
-                                    ui.label(&ticket.desc);
+                                    ui.label(ticket.desc.as_deref().unwrap_or("未知票种"));
 
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        let button_text = if ticket.clickable  { "选择" }else if ticket.sale_flag_number ==1 {"定时预选"}  else { "不可选" };
+                                        let button_text = if ticket.clickable.unwrap_or(false)  { "选择" }else if ticket.sale_flag_number.unwrap_or(0) ==1 {"定时预选"}  else { "不可选" };
                                         let button_enabled = true/* ticket.clickable */;
 
                                         if ui.add_enabled(
@@ -135,22 +150,22 @@ pub fn show(app: &mut Myapp, ctx: &egui::Context, uid: i64) {
                                             egui::Button::new(button_text)
                                         ).clicked() {
                                             // 使用正确的类型赋值
-                                            if !ticket.clickable{
+                                            if !ticket.clickable.unwrap_or(false){
                                                 log::error!("请注意！该票种目前不可售！但是会尝试下单，如果该票持续不可售，多次下单不可售票种可能会被b站拉黑")
                                             }
-                                            app.selected_screen_id = Some(selected_screen.id as i64);
-                                            app.selected_ticket_id = Some(ticket.id as i64);
+                                            app.selected_screen_id = Some(selected_screen.id.unwrap_or(0) as i64);
+                                            app.selected_ticket_id = Some(ticket.id.unwrap_or(0) as i64);
                                             app.show_screen_info = None;
-                                            bilibili_ticket.screen_id = selected_screen.id.to_string();
-                                            log::debug!("{}, {} , {}",selected_screen.id,ticket.id,ticket.project_id);
+                                            bilibili_ticket.screen_id = selected_screen.id.unwrap_or(0).to_string();
+                                            log::debug!("{}, {} , {}",selected_screen.id.unwrap_or(0),ticket.id.unwrap_or(0),ticket.project_id.unwrap_or(0));
 
 
                                             // 将选中的票种ID保存到项目ID中，准备抢票
-                                            app.ticket_id = ticket.project_id.to_string();
-                                            bilibili_ticket.select_ticket_id = Some(ticket.id.to_string());
+                                            app.ticket_id = ticket.project_id.unwrap_or(0).to_string();
+                                            bilibili_ticket.select_ticket_id = Some(ticket.id.unwrap_or(0).to_string());
                                             
                                             app.confirm_ticket_info= Some(bilibili_ticket.uid.to_string().clone());
-                                            log::info!("已选择: {} [{}]", &ticket.desc, ticket.id);
+                                            log::info!("已选择: {} [{}]", ticket.desc.as_deref().unwrap_or("未知"), ticket.id.unwrap_or(0));
                                         }
 
                                         ui.add_space(20.0);
@@ -158,7 +173,7 @@ pub fn show(app: &mut Myapp, ctx: &egui::Context, uid: i64) {
                                         ui.add_space(20.0);
 
                                         // 票价格式化为元
-                                        let price = format!("¥{:.2}", ticket.price as f64 / 100.0);
+                                        let price = format!("¥{:.2}", ticket.price.unwrap_or(0) as f64 / 100.0);
                                         ui.label(egui::RichText::new(price)
                                             .strong()
                                             .color(egui::Color32::from_rgb(245, 108, 108)));
@@ -175,7 +190,7 @@ pub fn show(app: &mut Myapp, ctx: &egui::Context, uid: i64) {
             ui.collapsing("查看详细信息", |ui| {
                 ui.label("基本信息:");
                 ui.indent("basic_info", |ui| {
-                    ui.label(format!("项目ID: {}", ticket_data.id));
+                    ui.label(format!("项目ID: {}", ticket_data.id.unwrap_or(0)));
 
                     // 检查performance_desc是否存在，并显示基础信息
                     if let Some(desc) = &ticket_data.performance_desc {
