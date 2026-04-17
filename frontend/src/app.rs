@@ -907,8 +907,8 @@ impl eframe::App for Myapp{
                     // 绘制横幅
                     render_error_banner(self, ctx);
                     
-                    // 持续重绘以实现动画效果
-                    ctx.request_repaint();
+                    // 持续重绘以实现动画效果（限制为60fps）
+                    ctx.request_repaint_after(std::time::Duration::from_millis(16));
                 } else {
                     // 超过2.5秒，停用横幅
                     self.error_banner_active = false;
@@ -932,8 +932,8 @@ impl eframe::App for Myapp{
                 
                     render_error_banner(self, ctx);
                     
-                    // 持续重绘以实现动画效果
-                    ctx.request_repaint();
+                    // 持续重绘以实现动画效果（限制为~60fps，避免GPU满载）
+                    ctx.request_repaint_after(std::time::Duration::from_millis(16));
                 } else {
                     // 超过4秒，停用横幅
                     self.success_banner_active = false;

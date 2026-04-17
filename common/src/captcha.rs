@@ -8,15 +8,20 @@ use crate::{ ticket::TokenRiskParam, utility::CustomConfig};
 
 #[derive(Clone)]  
 pub struct LocalCaptcha{
-    click: Option<Arc<Mutex<Click>>>,
+    click: Arc<Mutex<Option<Click>>>,
     slide: Option<Arc<Mutex<Slide>>>,
 }
 
 //Debug trait
 impl fmt::Debug for LocalCaptcha {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let click_ready = self
+            .click
+            .lock()
+            .map(|g| g.is_some())
+            .unwrap_or(false);
         f.debug_struct("LocalCaptcha")
-            .field("click", &if self.click.is_some() { "Some(Click)" } else { "None" })
+            .field("click", &if click_ready { "Some(Click)" } else { "None" })
             .field("slide", &if self.slide.is_some() { "Some(Slide)" } else { "None" })
             .finish()
     }
@@ -24,8 +29,25 @@ impl fmt::Debug for LocalCaptcha {
 
 impl LocalCaptcha {
     pub fn new() -> Self {
+        // 首次运行会下载模型，改为后台预热，避免阻塞主线程导致界面卡住
+        let click = Arc::new(Mutex::new(None));
+        let click_for_prewarm = Arc::clone(&click);
+        std::thread::spawn(move || {
+            match std::panic::catch_unwind(Click::default) {
+                Ok(model) => {
+                    if let Ok(mut guard) = click_for_prewarm.lock() {
+                        *guard = Some(model);
+                        log::info!("本地点选模型后台预热完成");
+                    }
+                }
+                Err(_) => {
+                    log::warn!("本地点选模型后台预热失败，将在首次使用时重试初始化");
+                }
+            }
+        });
+
         LocalCaptcha {
-            click: Some(Arc::new(Mutex::new(Click::default()))), //初始化点击对象
+            click,
             slide: None, //暂时先不初始化滑块，疑似出现滑块概率极低
         }
     }
@@ -44,29 +66,27 @@ pub async fn captcha(
         0 => {
             match captcha_type{
                 32 => {
-                    let mut slide = match local_captcha.slide {
-                        Some(c) =>c,
-                        None => {
-                            return Err("本地打码需要传入slide对象".to_string());
-                        }
-                    };
+                    if local_captcha.slide.is_none() {
+                        return Err("本地打码需要传入slide对象".to_string());
+                    }
                     Err("本地打码暂不支持三代滑块".to_string())
                 }
                 33 => { //三代点字
-                    let click_mutex = match &local_captcha.click {
-                        Some(c) =>Arc::clone(c),
-                        None => {
-                            return Err("本地打码需要传入click对象".to_string());
-                        }
-                    };
+                    let click_mutex = Arc::clone(&local_captcha.click);
                     let gt_clone = gt.to_string();
                     let challenge_clone = challenge.to_string();
                     let validate = tokio::task::spawn_blocking(move || {
-                        let mut click = click_mutex.lock().unwrap();
-                        click.simple_match_retry(&gt_clone, &challenge_clone)
+                        let mut click_guard = click_mutex.lock().unwrap();
+                        if click_guard.is_none() {
+                            log::info!("本地点选模型尚未就绪，开始按需初始化");
+                            *click_guard = Some(Click::default());
+                        }
+                        let click = click_guard.as_mut().unwrap();
+                        click
+                            .simple_match_retry(&gt_clone, &challenge_clone)
+                            .map_err(|e| e.to_string())
                     }).await
-                    .map_err(|e| format!("任务执行出错：{}",e))?
-                    .map_err(|e| format!("验证码模块出错：{}",e))?;
+                    .map_err(|e| format!("任务执行出错：{}",e))??;
                 
                     
                     

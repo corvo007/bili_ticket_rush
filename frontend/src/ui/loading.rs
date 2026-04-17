@@ -56,6 +56,6 @@ pub fn render_loading_overlay(app: &mut Myapp, ctx: &egui::Context) {
         egui::Color32::WHITE
     );
     
-    // 强制持续重绘以保持动画
-    ctx.request_repaint();
+    // 强制持续重绘以保持动画（限制为60fps）
+    ctx.request_repaint_after(std::time::Duration::from_millis(16));
 }
